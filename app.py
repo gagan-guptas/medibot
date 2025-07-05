@@ -1,0 +1,219 @@
+import streamlit as st
+from PyPDF2 import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain.chains.question_answering import load_qa_chain
+from dotenv import load_dotenv
+import google.generativeai as genai
+from PIL import Image
+from langchain.prompts import PromptTemplate
+import os
+from streamlit_mic_recorder import mic_recorder, speech_to_text
+from audio_handler import transcribe_audio
+from streamlit_option_menu import option_menu
+
+# Load environment variables
+load_dotenv()
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# Function to extract text from PDF files
+def get_pdf_text(pdf_docs):
+    text = ""
+    for pdf in pdf_docs:
+        pdf_reader = PdfReader(pdf)
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+    return text
+
+# Function to split text into chunks
+def get_text_chunks(text):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    chunks = text_splitter.split_text(text)
+    return chunks
+
+# Function to create vector store from text chunks
+def get_vector_store(text_chunks):
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
+    vector_store.save_local("faiss_index")
+
+# Function to get Gemini response for image input
+def get_gemini_response(input, image, prompt):
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content([input, image[0], prompt])
+    return response.text
+
+# Function to handle user input from audio
+def user_input_audio(user_question, transcribed_text, prompt):
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content([user_question, transcribed_text, prompt])
+    return response.text
+
+# Function to set up image input
+def input_image_setup(uploaded_file):
+    if uploaded_file is not None:
+        bytes_data = uploaded_file.getvalue()
+        image_parts = [{"mime_type": uploaded_file.type, "data": bytes_data}]
+        return image_parts
+    else:
+        raise FileNotFoundError("No file uploaded")
+
+
+# Function to create conversational chain for PDF documents
+def get_conversational_chain(prompt):
+    model = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.7)
+    prompt_template = """
+        Title: Detailed Notes for test  Results
+
+        Description: As a medical expert, the chatbot is tasked with providing comprehensive notes based on the results of a specific medical test. Whether it's a blood 
+         test, thyroid function test, HIV test, or blood sugar test, the chatbot assumes the role of a healthcare professional to analyze and interpret the test results 
+         accurately.
+
+        Key Points:
+        - Interpretation of Values: The notes delve into the interpretation of various parameters specific to each type of test. For example, in a blood test, parameters 
+         like hemoglobin levels, white blood cell count, and platelet count are analyzed. Similarly, thyroid function tests involve interpreting thyroid hormone levels 
+          such as TSH, T3, and T4.
+        - Explanation of Abnormal Values: The significance of abnormal values is explained in detail, highlighting their implications for the patient's health. Whether 
+         it's abnormal blood sugar levels indicative of diabetes mellitus or abnormal thyroid hormone levels suggesting thyroid disorders, the notes provide clarity on 
+          the implications.
+        - Insights into Underlying Conditions: Based on the test results, the notes offer insights into potential underlying conditions or diseases. This could include 
+         identifying potential infections or autoimmune disorders based on blood test results or diagnosing thyroid disorders based on thyroid function test results.
+        - Recommendations: Recommendations for further diagnostic tests or treatment options are provided based on the findings. This might include suggesting additional 
+         tests for confirmation, recommending lifestyle modifications, or proposing specific treatment options tailored to the patient's condition.
+        - Request for Test Results: Users are prompted to provide the specific test results relevant to the type of test being analyzed. This ensures that the generated 
+         notes are based on accurate information and tailored to the user's specific situation.
+
+        Context and Question: The chatbot utilizes the provided context and the user's question to generate personalized and relevant notes. By incorporating the context 
+         of the conversation and addressing the user's specific inquiry, the notes are more informative and useful.
+
+        Answer: The detailed notes generated by the chatbot are presented as the final answer, providing the user with valuable insights and recommendations based on 
+         their test results.
+
+        Context:
+        {context}
+        Question:
+        {question}
+        Answer:
+    """
+
+    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
+    return chain
+
+
+# Function to handle user input for PDF documents
+def user_input(user_question, pdf_docs, prompt):
+    raw_text = get_pdf_text(pdf_docs)
+    text_chunks = get_text_chunks(raw_text)
+    get_vector_store(text_chunks)
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
+    docs = new_db.similarity_search(user_question)
+    chain = get_conversational_chain(prompt)
+    response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+    return response["output_text"]
+
+
+# Main function to run the Streamlit app
+def main():
+
+    # Define your pages
+    def home_page():
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.image("medi_logo.png")  # Your logo file here
+
+    def contact_page():
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.image("THumb.png")
+        st.markdown("**Watch How to Use Our ChatBot [MediBot](https://youtube.com)**")
+
+    def upload_page():
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.image("XS.png")
+        st.markdown("**Unable to Type? Use Our [MediBot (Speech-to-Text Service)](https://huggingface.co/spaces/)**")
+        
+        interaction_type = st.sidebar.radio("Select Interaction Type", ["PDF", "Image", "Audio"])
+        # Sidebar for PDF-related interactions
+        st.sidebar.header("PDF-Related")
+        uploaded_file_pdf = st.sidebar.file_uploader("Upload your medical report (PDF)")
+
+        # Sidebar for image-related interactions
+        st.sidebar.header("Image-Related")
+        uploaded_file_image = st.sidebar.file_uploader("Upload your medical report (Images)")
+
+        # Sidebar for audio-related interactions
+        st.sidebar.header("Audio-Related")
+        uploaded_file_audio = st.sidebar.file_uploader("Upload an audio file", type=["mp3", "wav"])
+
+        # Common text input for all interaction types
+        if interaction_type == "PDF":
+            user_question = st.sidebar.text_input("Inquire about the PDF content")
+        elif interaction_type == "Image":
+            user_question = st.sidebar.text_input("Inquire about the Image content")
+        elif interaction_type == "Audio":
+            user_question = st.sidebar.text_input("Inquire about the audio content")
+
+        # Send button
+        if st.sidebar.button("Send"):
+            if interaction_type == "PDF" and uploaded_file_pdf is not None and user_question:
+                prompt = user_question
+                response_pdf = user_input(user_question, [uploaded_file_pdf], prompt)
+                st.write(
+                    "<div style='background-color: #31333f; padding: 6px; border-radius: 10px;'>👤 You: {}</div>".format(prompt),
+                    unsafe_allow_html=True
+                )
+                st.subheader("🤖 Response (PDF) :")
+                st.write(response_pdf)
+
+            elif interaction_type == "Image" and uploaded_file_image is not None and user_question:
+                prompt = user_question
+                st.write(
+                    "<div style='background-color: #31333f; padding: 6px; border-radius: 10px;'>👤 You: {}</div>".format(prompt),
+                    unsafe_allow_html=True
+                )
+                image = Image.open(uploaded_file_image)
+                st.image(image, caption="Uploaded Image.", use_column_width=True)
+                if user_question:
+                    image_data = input_image_setup(uploaded_file_image)
+                    response_image = get_gemini_response(user_question, image_data, prompt)
+                    st.subheader("🤖 Response (Image) :")
+                    st.write(response_image)
+
+            elif interaction_type == "Audio" and uploaded_file_audio is not None and user_question:
+                audio_bytes = uploaded_file_audio.read()
+                transcribed_text = transcribe_audio(audio_bytes)
+                prompt = user_question
+                st.write(
+                    "<div style='background-color: #31333f; padding: 6px; border-radius: 10px;'>👤 You: {}</div>".format(prompt),
+                    unsafe_allow_html=True
+                )
+                answer_audio = user_input_audio(user_question, transcribed_text, prompt)
+                st.subheader("🤖 Response (Audio) :")
+                st.write(answer_audio)
+
+
+    # Define the page options without Feedback
+    pages = {
+        "Home": home_page,
+        "Info": contact_page,
+        "ChatBot": upload_page,
+    }
+
+    # Display the page selection menu without Feedback
+    selected_page = option_menu(
+        None,
+        ["Home", "Info", "ChatBot"],
+        icons=['house', 'info', "robot"],
+        default_index=0,
+        orientation="horizontal"
+    )
+
+    # Run the selected page function
+    pages[selected_page]()
+
+
+if __name__ == "__main__":
+    main()
