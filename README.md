@@ -20,6 +20,22 @@ Medi-bot is a smart chatbot application that allows users to upload medical repo
 
 ---
 
+## Gemini API Model
+
+Medi-bot leverages the **Gemini API model**, developed by Google DeepMind, which is a state-of-the-art large language model designed for advanced conversational AI and multimodal understanding.
+
+### Key Highlights of Gemini API:
+
+- **Conversational AI:** Supports complex, multi-turn dialogue interactions.  
+- **Multimodal Input:** Processes text and images for richer context (depending on API capabilities).  
+- **Enhanced Reasoning:** Improved logic, arithmetic, and nuanced understanding.  
+- **Few-shot / Zero-shot Learning:** Efficiently performs new tasks with minimal examples.  
+- **Scalable Integration:** Accessible via Google Cloud AI API for seamless app integration.  
+
+By integrating Gemini, Medi-bot provides accurate, context-aware responses to medical queries, helping users interpret their health reports with confidence.
+
+---
+
 ## Getting Started
 
 Follow these steps to run Medi-bot on your local machine:
@@ -28,6 +44,7 @@ Follow these steps to run Medi-bot on your local machine:
 
 - Python 3.7+  
 - Pip package manager  
+- Google Cloud account with Gemini API access and credentials  
 
 ### Installation
 
@@ -36,3 +53,23 @@ Follow these steps to run Medi-bot on your local machine:
    ```bash
    git clone https://github.com/gagan-guptas/Medi-bot.git
    cd Medi-bot
+Create a .env file:
+
+Add necessary environment variables such as your Google API credentials and Gemini API keys.
+
+Install dependencies:
+
+bash
+Copy code
+pip install -r requirements.txt
+Run the application:
+
+bash
+Copy code
+streamlit run app.py
+Usage
+Upload your medical reports in supported formats.
+
+Interact with Medi-bot through text or voice commands.
+
+Receive AI-powered responses and insights to understand your health data better.
